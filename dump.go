@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -125,9 +126,7 @@ func (data *Data) Dump() error {
 
 	data.wg.Add(len(tables))
 	for _, name := range tables {
-		if err := data.dumpTable(name); err != nil {
-			return err
-		}
+		go data.dumpTable(name)
 	}
 	data.wg.Wait()
 	if data.err != nil {
@@ -142,21 +141,30 @@ func (data *Data) Dump() error {
 
 // MARK: writter methods
 
-func (data *Data) dumpTable(name string) error {
+func (data *Data) dumpTable(name string) {
+	// if data.err != nil {
+	// 	return
+	// }
+	// Comment out so you can watch it die alot
 	table, err := data.createTable(name)
-	if err != nil {
-		return err
+	if err != nil && data.err == nil {
+		data.err = err
+		return
 	}
 
-	go data.writeTable(table)
-	return nil
-}
-
-func (data *Data) writeTable(table *table) {
-	data.mux.Lock()
-	if err := data.tableTmpl.Execute(data.Out, table); err != nil && data.err == nil {
+	if err := data.writeTable(table); err != nil && data.err == nil {
 		data.err = err
 	}
+
+	if data.err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s", data.err.Error())
+	}
+	return
+}
+
+func (data *Data) writeTable(table *table) (err error) {
+	data.mux.Lock()
+	err = data.tableTmpl.Execute(data.Out, table)
 	data.mux.Unlock()
 	data.wg.Done()
 	return
