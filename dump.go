@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"text/template"
 	"time"
 )
@@ -47,7 +48,9 @@ type metaData struct {
 }
 
 const (
-	version                 = "0.4.1"
+	// Version of this plugin for easy reference
+	Version = "0.4.4"
+
 	defaultMaxAllowedPacket = 4194304
 )
 
@@ -101,9 +104,7 @@ DROP TABLE IF EXISTS {{ .NameEsc }};
 
 LOCK TABLES {{ .NameEsc }} WRITE;
 /*!40000 ALTER TABLE {{ .NameEsc }} DISABLE KEYS */;
-{{ range $value := .Stream }}
-{{- $value }}
-{{ end -}}
+{{ range $value := .Stream }}{{ $value }}{{ end }}
 /*!40000 ALTER TABLE {{ .NameEsc }} ENABLE KEYS */;
 UNLOCK TABLES;
 `
@@ -113,7 +114,7 @@ const nullType = "NULL"
 // Dump data using struct
 func (data *Data) Dump() error {
 	meta := metaData{
-		DumpVersion: version,
+		DumpVersion: Version,
 	}
 	data.initMaxPacketSize()
 
@@ -383,29 +384,45 @@ func (table *table) Stream() <-chan string {
 	valueOut := make(chan string, 1)
 	go func() {
 		defer close(valueOut)
-		var insert bytes.Buffer
+		var length int
+		write := func(val string) {
+			length += len(val)
+			valueOut <- val
+		}
 
 		for table.Next() {
 			b := table.RowBuffer()
 			// Truncate our insert if it won't fit
-			if insert.Len() != 0 && insert.Len()+b.Len() > table.data.MaxAllowedPacket-1 {
-				insert.WriteString(";")
-				valueOut <- insert.String()
-				insert.Reset()
+			if length != 0 && length+b.Len() > table.data.MaxAllowedPacket-1 {
+				write(";\n")
+				length = 0
 			}
 
-			if insert.Len() == 0 {
-				fmt.Fprintf(&insert, "INSERT INTO %s VALUES ", table.NameEsc())
+			if length == 0 {
+				write(fmt.Sprintf("INSERT INTO %s VALUES ", table.NameEsc()))
 			} else {
-				insert.WriteString(",")
+				write(",")
 			}
-			b.WriteTo(&insert)
-			b.Reset()
+			write(b.String())
+
+			// debug
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+			fmt.Print("\tBuffer = ", bToMiB(uint64(length)), " MiB")
+			fmt.Print("\tMaxPacket = ", bToMiB(uint64(table.data.MaxAllowedPacket)), " MiB")
+			fmt.Print("\tAlloc = ", bToMiB(m.Alloc), " MiB")
+			fmt.Print("\tTotalAlloc = ", bToMiB(m.TotalAlloc), " MiB")
+			fmt.Print("\tSys = ", bToMiB(m.Sys), " MiB")
+			fmt.Print("\tNumGC = ", m.NumGC, "\n")
 		}
-		if insert.Len() != 0 {
-			insert.WriteString(";")
-			valueOut <- insert.String()
+		if length != 0 {
+			write(";")
 		}
 	}()
 	return valueOut
+}
+
+func bToMiB(b uint64) uint64 {
+	return b / 1024 / 1024
 }
