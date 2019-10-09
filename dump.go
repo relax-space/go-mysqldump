@@ -20,6 +20,7 @@ Data struct to configure dump behavior
 */
 type Data struct {
 	Out              io.Writer
+	DatabaseName     string
 	Connection       *sql.DB
 	IgnoreTables     []string
 	MaxAllowedPacket int
@@ -41,6 +42,7 @@ type table struct {
 }
 
 type metaData struct {
+	DatabaseName  string
 	DumpVersion   string
 	ServerVersion string
 	CompleteTime  string
@@ -69,6 +71,8 @@ const headerTmpl = `-- Go SQL Dump {{ .DumpVersion }}
 /*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
 /*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+CREATE DATABASE  IF NOT EXISTS {{ .DatabaseName }} ;
+USE {{ .DatabaseName }} ;
 `
 
 // takes a *metaData
@@ -115,7 +119,8 @@ const nullType = "NULL"
 // Dump data using struct
 func (data *Data) Dump() error {
 	meta := metaData{
-		DumpVersion: Version,
+		DumpVersion:  Version,
+		DatabaseName: data.DbName(),
 	}
 
 	if data.MaxAllowedPacket == 0 {
@@ -150,6 +155,10 @@ func (data *Data) Dump() error {
 
 	meta.CompleteTime = time.Now().String()
 	return data.footerTmpl.Execute(data.Out, meta)
+}
+
+func (data *Data) DbName() string {
+	return "`" + data.DatabaseName + "`"
 }
 
 // MARK: - Private methods
